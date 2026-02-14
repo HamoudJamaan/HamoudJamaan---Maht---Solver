@@ -1,0 +1,63 @@
+package com.hamoudjamaan.mathsolver
+
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import androidx.cardview.widget.CardView
+import androidx.recyclerview.widget.RecyclerView
+import io.github.kexanie.library.MathView
+
+class SolutionsAdapter(
+    private val solutions: List<SolutionItem>,
+    private val onItemClick: (Int) -> Unit
+) : RecyclerView.Adapter<SolutionsAdapter.SolutionViewHolder>() {
+    
+    class SolutionViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val cardView: CardView = itemView.findViewById(R.id.cardSolution)
+        val tvQuestion: TextView = itemView.findViewById(R.id.tvQuestion)
+        val tvSolutionPreview: TextView = itemView.findViewById(R.id.tvSolutionPreview)
+        val tvSource: TextView = itemView.findViewById(R.id.tvSource)
+        val tvTime: TextView = itemView.findViewById(R.id.tvTime)
+        val mathView: MathView = itemView.findViewById(R.id.mathView)
+    }
+    
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SolutionViewHolder {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_solution, parent, false)
+        return SolutionViewHolder(view)
+    }
+    
+    override fun onBindViewHolder(holder: SolutionViewHolder, position: Int) {
+        val solution = solutions[position](holder.tvQuestion.text) = "س: ${solution.question}"
+        holder.tvSolutionPreview.text = solution.solution.take(100) + "..."
+        holder.tvSource.text = "المصدر: ${solution.source}"
+        holder.tvTime.text = solution.getFormattedTime()
+        
+        // عرض جزء من الحل في MathView
+        val mathText = extractMathPart(solution.solution)
+        holder.mathView.setText(mathText)
+        
+        holder.cardView.setOnClickListener {
+            onItemClick(position)
+        }
+    }
+    
+    private fun extractMathPart(solution: String): String {
+        // استخراج الجزء الرياضي من الحل
+        val lines = solution.split("\n")
+        for (line in lines) {
+            if (line.containsAnyOf("=", "+", "-", "∫", "√", "x", "y")) {
+                return line.trim()
+            }
+        }
+        return solution.take(50)
+    }
+    
+    private fun String.containsAnyOf(vararg strings: String): Boolean {
+        return strings.any { this.contains(it) }
+    }
+    
+    override fun getItemCount(): Int = solutions.size
+}
+

@@ -1,0 +1,20 @@
+app/
+├── src/main/
+│   ├── java/com/hamoudjamaan/mathsolver/
+│   │   ├── MainActivity.kt
+│   │   ├── SolutionItem.kt
+│   │   └── SolutionsAdapter.kt
+│   ├── res/
+│   │   ├── layout/
+│   │   │   ├── activity_main.xml
+│   │   │   └── item_solution.xml
+│   │   ├── values/
+│   │   │   ├── colors.xml
+│   │   │   ├── strings.xml
+│   │   │   └── themes.xml
+│   │   └── mipmap-hdpi/ic_launcher.png  (أيقونة H.J)
+│   ├── assets/
+│   │   └── tessdata/ara.traineddata
+│   └── AndroidManifest.xml
+└── build.gradle (Module: app)
+

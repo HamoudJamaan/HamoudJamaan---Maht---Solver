@@ -1,0 +1,14 @@
+package com.hamoudjamaan.mathsolver
+
+data class SolutionItem(
+    val question: String,
+    val solution: String,
+    val source: String,
+    val timestamp: Long
+) {
+    fun getFormattedTime(): String {
+        val sdf = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale("ar"))
+        return sdf.format(java.util.Date(timestamp))
+    }
+}
+

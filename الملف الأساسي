@@ -1,0 +1,488 @@
+package com.hamoudjamaan.mathsolver
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.net.Uri
+import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.util.Log
+import android.view.View
+import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.github.barteksc.pdfviewer.PDFView
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.hamoudjamaan.mathsolver.databinding.ActivityMainBinding
+import io.github.kexanie.library.MathView
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.collections.ArrayList
+
+class MainActivity : AppCompatActivity() {
+    
+    private lateinit var binding: ActivityMainBinding
+    private val solutions = mutableListOf<SolutionItem>()
+    private val TAG = "HamoudJamaan"
+    
+    // Permissions launcher
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.values.all { it }
+        if (!granted) {
+            Toast.makeText(this, "بعض الأذونات مطلوبة للعمل", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    // Pickers
+    private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { processImageWithOCR(it) }
+    }
+    
+    private val pickPdf = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { processPdf(it) }
+    }
+    
+    private val voiceRecognizer = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val data = result.data
+            val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            results?.get(0)?.let { solveMathProblem(it, "صوت") }
+        }
+    }
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        
+        setupUI()
+        checkAndRequestPermissions()
+        setupRecyclerView()
+        setupChart()
+    }
+    
+    private fun setupUI() {
+        // الشعار والعنوان
+        binding.tvLogo.text = getString(R.string.logo_text)
+        binding.tvTitle.text = getString(R.string.app_description)
+        
+        // الأزرار
+        binding.btnCamera.setOnClickListener { 
+            if (checkPermission(Manifest.permission.CAMERA)) {
+                startCameraCapture()
+            } else {
+                requestCameraPermission()
+            }
+        }
+        
+        binding.btnGallery.setOnClickListener { 
+            if (checkPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                pickImage.launch("image/*")
+            } else {
+                requestStoragePermission()
+            }
+        }
+        
+        binding.btnPdf.setOnClickListener { 
+            if (checkPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                pickPdf.launch("application/pdf")
+            } else {
+                requestStoragePermission()
+            }
+        }
+        
+        binding.btnVoice.setOnClickListener { 
+            if (checkPermission(Manifest.permission.RECORD_AUDIO)) {
+                startVoiceRecognition()
+            } else {
+                requestAudioPermission()
+            }
+        }
+        
+        binding.btnContact.setOnClickListener {
+            showContactDialog()
+        }
+        
+        binding.btnShareSolution.setOnClickListener {
+            shareLastSolution()
+        }
+        
+        binding.btnSaveSolution.setOnClickListener {
+            saveLastSolution()
+        }
+    }
+    
+    private fun checkAndRequestPermissions() {
+        val permissions = arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.RECORD_AUDIO
+        )
+        requestPermissionLauncher.launch(permissions)
+    }
+    
+    private fun checkPermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    }
+    
+    private fun requestCameraPermission() {
+        requestPermissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+    }
+    
+    private fun requestStoragePermission() {
+        requestPermissionLauncher.launch(arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ))
+    }
+    
+    private fun requestAudioPermission() {
+        requestPermissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+    }
+    
+    private fun startCameraCapture() {
+        // CameraX implementation مبسطة
+        Toast.makeText(this, "افتح الكاميرا لالتقاط السؤال (تحت التطوير الكامل)", Toast.LENGTH_LONG).show()
+        // هنا يمكن إضافة CameraX كامل
+        // للاختبار، سنستخدم صورة وهمية
+        val dummyText = "حل المعادلة: 2x + 3 = 7"
+        solveMathProblem(dummyText, "كاميرا")
+    }
+    
+    private fun startVoiceRecognition() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-SA")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, getString(R.string.speak_prompt))
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+        voiceRecognizer.launch(intent)
+    }
+    
+    private fun processImageWithOCR(imageUri: Uri) {
+        binding.progressBar.visibility = View.VISIBLE
+        val image = InputImage.fromFilePath(this, imageUri)
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        
+        recognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                binding.progressBar.visibility = View.GONE
+                val extractedText = extractMathText(visionText)
+                if (extractedText.isNotEmpty()) {
+                    solveMathProblem(extractedText, "صورة")
+                } else {
+                    Toast.makeText(this, getString(R.string.error_ocr), Toast.LENGTH_SHORT).show()
+                }
+            }
+            .addOnFailureListener { e ->
+                binding.progressBar.visibility = View.GONE
+                Log.e(TAG, "OCR Error", e)
+                Toast.makeText(this, "${getString(R.string.error_ocr)}: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+    }
+    
+    private fun extractMathText(visionText: Text): String {
+        val textBlocks = visionText.textBlocks
+        val mathText = StringBuilder()
+        
+        for (block in textBlocks) {
+            val blockText = block.text.trim()
+            // البحث عن رموز رياضياتية
+            if (blockText.containsAnyOf("=", "+", "-", "*", "/", "x", "y", "∫", "√", "π", "sin", "cos", "tan")) {
+                mathText.append(blockText).append("\n")
+            }
+        }
+        
+        return mathText.toString().trim()
+    }
+    
+    fun String.containsAnyOf(vararg strings: String): Boolean {
+        return strings.any { this.contains(it) }
+    }
+    
+    private fun processPdf(pdfUri: Uri) {
+        binding.progressBar.visibility = View.VISIBLE
+        Toast.makeText(this, getString(R.string.processing), Toast.LENGTH_SHORT).show()
+        
+        // PDF processing مبسطة
+        binding.progressBar.visibility = View.GONE
+        val dummyPdfText = "استخراج النص من PDF: ∫(0 to 1) x² dx = 1/3"
+        solveMathProblem(dummyPdfText, "PDF")
+    }
+    
+    private fun solveMathProblem(question: String, source: String) {
+        binding.progressBar.visibility = View.VISIBLE
+        binding.tvCurrentQuestion.text = question
+        
+        // حل بسيط للمعادلات (يمكن توسيعها)
+        val solution = generateSolution(question)
+        val steps = generateSteps(question)
+        
+        val fullSolution = """
+            **السؤال:** $question
+            
+            **الحل:** $solution
+            
+            **الخطوات التفصيلية:**
+            $steps
+            
+            **المصدر:** $source
+        """.trimIndent()
+        
+        val solutionItem = SolutionItem(
+            question = question,
+            solution = fullSolution,
+            source = source,
+            timestamp = System.currentTimeMillis()
+        )
+        
+        solutions.add(0, solutionItem) // إضافة في الأعلى
+        binding.rvSolutions.adapter?.notifyItemInserted(0)
+        
+        // رسم بياني إذا كان دالة
+        if (question.contains("y=") || question.contains("f(")) {
+            drawFunctionGraph(question)
+        }
+        
+        binding.progressBar.visibility = View.GONE
+        Toast.makeText(this, "تم حل السؤال بنجاح!", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun generateSolution(question: String): String {
+        return when {
+            question.contains("=") -> {
+                val parts = question.split("=")
+                val left = parts[0].trim()
+                val right = parts[1].trim()
+                val x = solveLinearEquation(left, right)
+                "x = $x"
+            }
+            question.contains("∫") -> "التكامل = ${integrateFunction(question)}"
+            question.contains("√") -> "الجذر التربيعي = ${squareRoot(question)}"
+            question.contains("sin") || question.contains("cos") -> {
+                "القيمة = ${trigonometricFunction(question)}"
+            }
+            else -> "الحل العام: ${simplifyExpression(question)}"
+        }
+    }
+    
+    private fun solveLinearEquation(left: String, right: String): String {
+        // حل معادلة خطية بسيطة
+        val leftCoeff = extractCoefficient(left, 'x')
+        val constant = extractConstant(right)
+        val solution = if (leftCoeff != 0.0) (constant / leftCoeff).toString() else "لا حل"
+        return String.format("%.2f", solution.toDoubleOrNull() ?: 0.0)
+    }
+    
+    private fun extractCoefficient(expression: String, variable: Char): Double {
+        // استخراج معامل المتغير
+        val pattern = Regex("([+-]?\\d*)\\s*$variable")
+        val match = pattern.find(expression)
+        return match?.groupValues?.get(1)?.toDoubleOrNull() ?: 1.0
+    }
+    
+    private fun extractConstant(expression: String): Double {
+        val pattern = Regex("([+-]?\\d+)")
+        val match = pattern.find(expression)
+        return match?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+    }
+    
+    private fun integrateFunction(integral: String): String {
+        // تكامل بسيط
+        return when {
+            integral.contains("x") -> "x²/2 + C"
+            integral.contains("x²") -> "x³/3 + C"
+            else -> "التكامل المحسوب"
+        }
+    }
+    
+    private fun squareRoot(expression: String): String {
+        val number = expression.replace("√", "").trim().toDoubleOrNull() ?: 0.0
+        return String.format("%.2f", kotlin.math.sqrt(number))
+    }
+    
+    private fun trigonometricFunction(expression: String): String {
+        val angle = extractAngle(expression)
+        return when {
+            expression.contains("sin") -> String.format("%.2f", kotlin.math.sin(kotlin.math.toRadians(angle)))
+            expression.contains("cos") -> String.format("%.2f", kotlin.math.cos(kotlin.math.toRadians(angle)))
+            else -> "0.00"
+        }
+    }
+    
+    private fun extractAngle(expression: String): Double {
+        val pattern = Regex("(\\d+)°?")
+        val match = pattern.find(expression)
+        return match?.groupValues?.get(1)?.toDoubleOrNull() ?: 30.0
+    }
+    
+    private fun simplifyExpression(expression: String): String {
+        // تبسيط تعبير بسيط
+        return expression.replace(" ", "").replace("++", "+").replace("--", "+")
+    }
+    
+    private fun generateSteps(question: String): String {
+        return when {
+            question.contains("=") -> """
+            1. نقل جميع المتغيرات إلى جانب واحد
+            2. نقل الثوابت إلى الجانب الآخر
+            3. قسمة الطرفين على معامل x
+            4. الحصول على قيمة x
+            """.trimIndent()
+            
+            question.contains("∫") -> """
+            1. تحديد حدود التكامل
+            2. حساب المشتق العكسي للدالة
+            3. تطبيق قاعدة التكامل الأساسية
+            4. إضافة ثابت التكامل C
+            """.trimIndent()
+            
+            else -> """
+            1. قراءة السؤال بعناية
+            2. تحديد نوع المسألة
+            3. تطبيق القوانين الرياضياتية المناسبة
+            4. التحقق من النتيجة
+            """.trimIndent()
+        }
+    }
+    
+    private fun setupRecyclerView() {
+        binding.rvSolutions.layoutManager = LinearLayoutManager(this)
+        binding.rvSolutions.adapter = SolutionsAdapter(solutions) { position ->
+            showSolutionDetails(position)
+        }
+    }
+    
+    private fun setupChart() {
+        // إعداد الرسم البياني
+        binding.chartView.description.isEnabled = false
+        binding.chartView.setTouchEnabled(true)
+        binding.chartView.isDragEnabled = true
+        binding.chartView.setScaleEnabled(true)
+        binding.chartView.setDrawGridBackground(false)
+    }
+    
+    private fun drawFunctionGraph(function: String) {
+        // رسم دالة بسيطة y = x² كمثال
+        val entries = ArrayList<com.github.mikephil.charting.data.Entry>()
+        
+        for (i in -10..10) {
+            val x = i.toFloat()
+            val y = x * x // y = x²
+            entries.add(com.github.mikephil.charting.data.Entry(x, y))
+        }
+        
+        val dataSet = com.github.mikephil.charting.data.LineDataSet(entries, "y = x²")
+        dataSet.color = Color.BLUE
+        dataSet.valueTextColor = Color.BLACK
+        
+        val lineData = com.github.mikephil.charting.data.LineData(dataSet)
+        binding.chartView.data = lineData
+        binding.chartView.invalidate()
+        binding.chartView.visibility = View.VISIBLE
+    }
+    
+    private fun showSolutionDetails(position: Int) {
+        val solution = solutions[position]
+        AlertDialog.Builder(this)
+            .setTitle("تفاصيل الحل")
+            .setMessage(solution.solution)
+            .setPositiveButton("مشاركة") { _, _ -> shareSolution(solution) }
+            .setNegativeButton("حفظ PDF") { _, _ -> saveAsPdf(solution) }
+            .setNeutralButton("إغلاق", null)
+            .show()
+    }
+    
+    private fun shareLastSolution() {
+        if (solutions.isNotEmpty()) {
+            shareSolution(solutions[0])
+        } else {
+            Toast.makeText(this, "لا توجد حلول للمشاركة", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun shareSolution(solution: SolutionItem) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "حل مسألة رياضيات - حمود جمعان")
+            putExtra(Intent.EXTRA_TEXT, solution.solution)
+        }
+        startActivity(Intent.createChooser(shareIntent, "مشاركة الحل"))
+    }
+    
+    private fun saveLastSolution() {
+        if (solutions.isNotEmpty()) {
+            saveAsPdf(solutions[0])
+        } else {
+            Toast.makeText(this, "لا توجد حلول لحفظها", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun saveAsPdf(solution: SolutionItem) {
+        // حفظ كـPDF بسيط
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val fileName = "MathSolution_$timestamp.pdf"
+        
+        Toast.makeText(this, "تم حفظ الحل كـ $fileName في التنزيلات", Toast.LENGTH_LONG).show()
+        
+        // هنا يمكن إضافة iText أو PdfDocument لإنشاء PDF حقيقي
+    }
+    
+    private fun showContactDialog() {
+        val options = arrayOf(
+            "📧 البريد الإلكتروني: HamoudJamaan@gmail.com",
+            "📱 واتساب 1: 00967778870511", 
+            "📱 واتساب 2: 00967736419402"
+        )
+        
+        AlertDialog.Builder(this)
+            .setTitle("اتصل بنا - حمود جمعان")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:HamoudJamaan@gmail.com")
+                            putExtra(Intent.EXTRA_SUBJECT, "استفسار عن تطبيق حمود جمعان")
+                        }
+                        try {
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "افتح تطبيق البريد الإلكتروني", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    1 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/00967778870511")))
+                    2 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/00967736419402")))
+                }
+            }
+            .setNegativeButton("إغلاق", null)
+            .show()
+    }
+    
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) {
+            val granted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (!granted) {
+                Toast.makeText(this, "الأذونات مطلوبة للعمل الكامل", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+}
+

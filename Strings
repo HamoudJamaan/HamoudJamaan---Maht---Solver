@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">حمود جمعان</string>
+    <string name="logo_text">الرياضيات هي اللغة التي كتب بها الكون</string>
+    <string name="app_description">لحل أسئلة الرياضيات المكتوبة بالرموز العربية</string>
+    <string name="camera">📷 الكاميرا</string>
+    <string name="gallery">🖼️ معرض الصور</string>
+    <string name="pdf">📄 ملف PDF</string>
+    <string name="voice">🎤 التحدث</string>
+    <string name="contact">📧 اتصل بنا</string>
+    <string name="solutions">الحلول المحفوظة</string>
+    <string name="speak_prompt">قل السؤال الرياضي...</string>
+    <string name="error_ocr">خطأ في قراءة الصورة</string>
+    <string name="processing">جاري المعالجة...</string>
+</resources>
+
